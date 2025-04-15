@@ -74,8 +74,8 @@
         faceMesh.setOptions({
             maxNumFaces: 1,
             refineLandmarks: false,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
+            minDetectionConfidence: 0.3,
+            minTrackingConfidence: 0.3
         });
         faceMesh.onResults(onResults);
 
@@ -84,7 +84,8 @@
                 await faceMesh.send({image: videoElement});
             },
             width: 640,
-            height: 480
+            height: 480,
+            backcamera: true
         });
         camera.start();
     </script>
