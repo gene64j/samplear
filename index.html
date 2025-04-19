@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>MediaPipe Face Tracking (Rear Camera)</title>
+    <title>MediaPipe Face Tracking</title>
     <style>
         .container {
             position: relative;
@@ -24,23 +24,11 @@
             height: 480px;
             z-index: 2;
         }
-        body, html {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            overflow: hidden;
-        }
-        .fullscreen-video {
-            display: block;
-            width: 100%;
-            height: 100%;
-            object-fit: cover; /* アスペクト比を維持しつつ、要素を覆うように拡大縮小 */
-        }
     </style>
 </head>
 <body>
     <div class="container">
-        <video class="input_video" class="fullscreen-video" autoplay playsinline></video>
+        <video class="input_video"></video>
         <canvas class="output_canvas" width="640px" height="480px"></canvas>
     </div>
 
@@ -53,9 +41,9 @@
         const videoElement = document.getElementsByClassName('input_video')[0];
         const canvasElement = document.getElementsByClassName('output_canvas')[0];
         const canvasCtx = canvasElement.getContext('2d');
-        const drawingUtils = new DrawingUtils(canvasElement);
 
-        let camera;
+        // Drawing Utils ライブラリのインスタンスを作成
+        const drawingUtils = new DrawingUtils(canvasElement); // ここが56行目付近です
 
         function onResults(results) {
             canvasCtx.save();
@@ -94,44 +82,14 @@
         });
         faceMesh.onResults(onResults);
 
-        navigator.mediaDevices.enumerateDevices()
-            .then(devices => {
-                let rearCameraDeviceId = null;
-                const rearCameraKeywords = ['back', 'rear', '背面'];
-
-                devices.forEach(device => {
-                    if (device.kind === 'videoinput') {
-                        for (const keyword of rearCameraKeywords) {
-                            if (device.label.toLowerCase().includes(keyword)) {
-                                rearCameraDeviceId = device.deviceId;
-                                break;
-                            }
-                        }
-                    }
-                });
-
-                const cameraConfig = {
-                    onFrame: async () => {
-                        await faceMesh.send({image: videoElement});
-                    },
-                    width: 640,
-                    height: 480,
-                    facingMode: 'environment' // より直接的に背面カメラを指定を試みる
-                };
-
-                if (rearCameraDeviceId) {
-                    cameraConfig.deviceId = rearCameraDeviceId;
-                    console.log('背面カメラ (deviceId指定) を使用します。');
-                } else {
-                    console.log('背面カメラ (キーワード検索) に一致するデバイスが見つかりませんでした。facingMode: "environment" を試します。');
-                }
-
-                camera = new Camera(videoElement, cameraConfig);
-                camera.start();
-            })
-            .catch(error => {
-                console.error('Error getting devices:', error);
-            });
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await faceMesh.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        camera.start();
     </script>
 </body>
 </html>
