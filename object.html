@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MediaPipe Object Detection</title>
+    <style>
+        .container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+        }
+        .input_video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 640px;
+            height: 480px;
+            z-index: 1;
+        }
+        .output_canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 640px;
+            height: 480px;
+            z-index: 2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <video class="input_video"></video>
+        <canvas class="output_canvas" width="640px" height="480px"></canvas>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/object_detection/object_detection.js" crossorigin="anonymous"></script>
+
+    <script>
+        const videoElement = document.getElementsByClassName('input_video')[0];
+        const canvasElement = document.getElementsByClassName('output_canvas')[0];
+        const canvasCtx = canvasElement.getContext('2d');
+
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+            if (results.detections) {
+                for (const detection of results.detections) {
+                    const boundingBox = detection.boundingBox;
+                    const score = detection.score[0];
+                    const category = detection.category;
+
+                    // バウンディングボックスの描画
+                    canvasCtx.strokeStyle = 'red';
+                    canvasCtx.lineWidth = 2;
+                    canvasCtx.strokeRect(
+                        boundingBox.originX * canvasElement.width,
+                        boundingBox.originY * canvasElement.height,
+                        boundingBox.width * canvasElement.width,
+                        boundingBox.height * canvasElement.height
+                    );
+
+                    // クラス名と信頼度の描画
+                    canvasCtx.fillStyle = 'red';
+                    canvasCtx.font = '16px sans-serif';
+                    canvasCtx.fillText(
+                        `${category.displayName}: ${(score * 100).toFixed(2)}%`,
+                        boundingBox.originX * canvasElement.width + 10,
+                        boundingBox.originY * canvasElement.height + 20
+                    );
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        const objectDetector = new ObjectDetection({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/object_detection/${file}`;
+        }});
+        objectDetector.setOptions({
+            maxNumObjects: 5, // 検出する最大の物体数
+            minDetectionConfidence: 0.5 // 検出の信頼度の閾値
+        });
+        objectDetector.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await objectDetector.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        camera.start();
+    </script>
+</body>
+</html>
