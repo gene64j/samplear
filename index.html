@@ -41,9 +41,7 @@
         const videoElement = document.getElementsByClassName('input_video')[0];
         const canvasElement = document.getElementsByClassName('output_canvas')[0];
         const canvasCtx = canvasElement.getContext('2d');
-
-        // Drawing Utils ライブラリのインスタンスを作成
-        const drawingUtils = new DrawingUtils(canvasElement); // ここが56行目付近です
+        const drawingUtils = window;
 
         function onResults(results) {
             canvasCtx.save();
