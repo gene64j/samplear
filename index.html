@@ -3,17 +3,23 @@
 <head>
     <title>MediaPipe Face Tracking</title>
     <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+        }
         .container {
             position: relative;
             width: 640px;
             height: 480px;
         }
         .input_video {
+            display: block;
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 640px;
-            height: 480px;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
             z-index: 1;
         }
         .output_canvas {
@@ -80,12 +86,18 @@
         });
         faceMesh.onResults(onResults);
 
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }) // 背面カメラを優先
+            .then(stream => {
+                videoElement.srcObject = stream;
+            })
+            .catch(error => {
+                console.error('カメラへのアクセスに失敗しました:', error);
+            });
+        
         const camera = new Camera(videoElement, {
             onFrame: async () => {
                 await faceMesh.send({image: videoElement});
-            },
-            width: 640,
-            height: 480
+            }
         });
         camera.start();
     </script>
