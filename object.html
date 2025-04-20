@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>MediaPipe Object Detection</title>
+    <title>MediaPipe Face Tracking (Rear Camera)</title>
     <style>
         .container {
             position: relative;
@@ -28,70 +28,59 @@
 </head>
 <body>
     <div class="container">
-        <video class="input_video"></video>
+        <video class="input_video" class="fullscreen-video"></video>
         <canvas class="output_canvas" width="640px" height="480px"></canvas>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
 
     <script>
         const videoElement = document.getElementsByClassName('input_video')[0];
         const canvasElement = document.getElementsByClassName('output_canvas')[0];
         const canvasCtx = canvasElement.getContext('2d');
+        const drawingUtils = window;
+
+        let camera;
 
         function onResults(results) {
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
             canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-            if (results.detections) {
-                for (const detection of results.detections) {
-                    const boundingBox = detection.boundingBox;
-                    const score = detection.score[0];
-                    const category = detection.category;
-
-                    // バウンディングボックスの描画
-                    canvasCtx.strokeStyle = 'red';
-                    canvasCtx.lineWidth = 2;
-                    canvasCtx.strokeRect(
-                        boundingBox.originX * canvasElement.width,
-                        boundingBox.originY * canvasElement.height,
-                        boundingBox.width * canvasElement.width,
-                        boundingBox.height * canvasElement.height
-                    );
-
-                    // クラス名と信頼度の描画
-                    canvasCtx.fillStyle = 'red';
-                    canvasCtx.font = '16px sans-serif';
-                    canvasCtx.fillText(
-                        `${category.displayName}: ${(score * 100).toFixed(2)}%`,
-                        boundingBox.originX * canvasElement.width + 10,
-                        boundingBox.originY * canvasElement.height + 20
-                    );
+            if (results.multiFaceLandmarks) {
+                for (const landmarks of results.multiFaceLandmarks) {
+                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, { color: '#C0C0C070', lineWidth: 1 });
+                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, { color: '#FF3030' });
+                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYEBROW, { color: '#FF3030' });
+                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYE, { color: '#30FF30' });
+                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYEBROW, { color: '#30FF30' });
+                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_FACE_OVAL, { color: '#E0E0E0' });
+                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_LIPS, {color: '#E0E0E0'});
                 }
             }
             canvasCtx.restore();
         }
 
-        const objectDetector = new ObjectDetection({locateFile: (file) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/object_detection/${file}`;
+        const faceMesh = new FaceMesh({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
         }});
-        objectDetector.setOptions({
-            maxNumObjects: 5, // 検出する最大の物体数
-            minDetectionConfidence: 0.5 // 検出の信頼度の閾値
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
         });
-        objectDetector.onResults(onResults);
+        faceMesh.onResults(onResults);
 
-        const camera = new Camera(videoElement, {
-            onFrame: async () => {
-                await objectDetector.send({image: videoElement});
-            },
-            width: 640,
-            height: 480
-        });
-        camera.start();
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }) // 背面カメラを優先
+            .then(stream => {
+                videoElement.srcObject = stream;
+            })
+            .catch(error => {
+                console.error('カメラへのアクセスに失敗しました:', error);
+            });
     </script>
 </body>
 </html>
