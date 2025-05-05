@@ -1,98 +1,107 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>MediaPipe Face Tracking (Rear Camera)</title>
+    <title>リアルタイムオブジェクト検出</title>
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            overflow: hidden;
-        }
-        .fullscreen-video {
-            display: block;
+        body { margin: 0; }
+        video {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
             height: 100%;
-            object-fit: cover; /* アスペクト比を維持しつつ、要素を覆うように拡大縮小 */
-        }
-        .container {
-            position: relative;
-            width: 640px;
-            height: 480px;
-        }
-        .input_video {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 640px;
-            height: 480px;
+            object-fit: cover;
             z-index: 1;
         }
-        .output_canvas {
+        canvas {
             position: absolute;
             top: 0;
             left: 0;
-            width: 640px;
-            height: 480px;
+            width: 100%;
+            height: 100%;
             z-index: 2;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <video class="input_video" class="fullscreen-video"></video>
-        <canvas class="output_canvas" width="640px" height="480px"></canvas>
-    </div>
+    <video id="webcam" autoplay playsinline width="640" height="480"></video>
+    <canvas id="output_canvas" width="640" height="480"></canvas>
 
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     <script>
-        const videoElement = document.getElementsByClassName('input_video')[0];
-        const canvasElement = document.getElementsByClassName('output_canvas')[0];
-        const canvasCtx = canvasElement.getContext('2d');
-        const drawingUtils = window;
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('output_canvas');
+        const ctx = canvas.getContext('2d');
+        let model;
 
-        let camera;
-
-        function onResults(results) {
-            canvasCtx.save();
-            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-            if (results.multiFaceLandmarks) {
-                for (const landmarks of results.multiFaceLandmarks) {
-                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, { color: '#C0C0C070', lineWidth: 1 });
-                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, { color: '#FF3030' });
-                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYEBROW, { color: '#FF3030' });
-                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYE, { color: '#30FF30' });
-                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYEBROW, { color: '#30FF30' });
-                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_FACE_OVAL, { color: '#E0E0E0' });
-                    drawingUtils.drawConnectors(canvasCtx, landmarks, FACEMESH_LIPS, {color: '#E0E0E0'});
-                }
+        async function setupCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error(
+                    'Your browser does not support getUserMedia.');
             }
-            canvasCtx.restore();
+
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { facingMode: 'user' }, // フロントカメラを優先
+            });
+            video.srcObject = stream;
+
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    resolve(video);
+                };
+            });
         }
 
-        const faceMesh = new FaceMesh({locateFile: (file) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
-        }});
-        faceMesh.setOptions({
-            maxNumFaces: 1,
-            refineLandmarks: false,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-        });
-        faceMesh.onResults(onResults);
+        async function loadModel() {
+            model = await cocoSsd.load();
+            console.log('Model loaded.');
+        }
 
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }) // 背面カメラを優先
-            .then(stream => {
-                videoElement.srcObject = stream;
-            })
-            .catch(error => {
-                console.error('カメラへのアクセスに失敗しました:', error);
-            });
+        async function detectObjects() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (model && video.readyState === video.HAVE_ENOUGH_DATA) {
+                const predictions = await model.detect(video);
+                console.log('Predictions: ', predictions);
+
+                for (let i = 0; i < predictions.length; i++) {
+                    const bbox = predictions[i].bbox;
+                    const classLabel = predictions[i].class;
+                    const score = (predictions[i].score * 100).toFixed(1);
+
+                    // バウンディングボックスの描画
+                    ctx.beginPath();
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = 'red';
+                    ctx.rect(bbox[0], bbox[1], bbox[2], bbox[3]);
+                    ctx.stroke();
+
+                    // クラスラベルと信頼度の描画
+                    ctx.fillStyle = 'red';
+                    ctx.font = '14px sans-serif';
+                    ctx.fillText(`${classLabel} (${score}%)`, bbox[0], bbox[1] > 10 ? bbox[1] - 5 : bbox[1] + 15);
+                }
+            }
+
+            requestAnimationFrame(detectObjects); // 次のフレームで再度検出
+        }
+
+        async function main() {
+            try {
+                await setupCamera();
+                await loadModel();
+                // カメラのサイズに合わせてキャンバスのサイズを調整
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                detectObjects();
+            } catch (error) {
+                console.error('Error: ', error);
+            }
+        }
+
+        main();
     </script>
 </body>
 </html>
