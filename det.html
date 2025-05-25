@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>リアルタイム顔検出</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+    #video, #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+    }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const classNames = ["face", "horn", "left_eye", "nose", "right_eye"];
+    const threshold = 0.5;
+    let model;
+
+    // モデル読み込み
+    async function loadModel() {
+      model = await tf.loadGraphModel("web_model/model.json");
+      console.log("モデル読み込み完了");
+    }
+
+    // カメラ起動
+    async function setupCamera() {
+      const video = document.getElementById("video");
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false
+      });
+      video.srcObject = stream;
+      return new Promise(resolve => {
+        video.onloadedmetadata = () => {
+          resolve(video);
+        };
+      });
+    }
+
+    async function detect(video, canvas) {
+      const ctx = canvas.getContext("2d");
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      const inputTensor = tf.browser.fromPixels(video);
+      const resized = tf.image.resizeBilinear(inputTensor, [512, 512]);
+      const expanded = resized.expandDims(0).toInt();
+      const dict = { 'input_tensor': expanded };
+
+      const results = await model.executeAsync(dict);
+      const [classesTensor, boxesTensor, multiScoresTensor] = [
+        results[0], // Identity_2
+        results[1], // detection_boxes
+        results[2], // detection_multiclass_scores
+      ];
+
+      const boxes = boxesTensor.arraySync()[0]; // [100][4]
+      const scores = multiScoresTensor.arraySync()[0]; // [100][num_classes]
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (let i = 0; i < boxes.length; i++) {
+        const scoreArray = scores[i];
+        const maxScore = Math.max(...scoreArray);
+        const classIndex = scoreArray.indexOf(maxScore);
+        const label = classNames[classIndex];
+
+        if (maxScore > threshold && label === "face") {
+          const [ymin, xmin, ymax, xmax] = boxes[i];
+          const x = xmin * canvas.width;
+          const y = ymin * canvas.height;
+          const w = (xmax - xmin) * canvas.width;
+          const h = (ymax - ymin) * canvas.height;
+
+          ctx.strokeStyle = "red";
+          ctx.lineWidth = 3;
+          ctx.strokeRect(x, y, w, h);
+
+          ctx.fillStyle = "red";
+          ctx.font = "18px sans-serif";
+          ctx.fillText(`${label} ${(maxScore * 100).toFixed(1)}%`, x + 4, y + 18);
+        }
+      }
+
+      tf.dispose([inputTensor, resized, expanded, ...results]);
+    }
+
+    async function main() {
+      await loadModel();
+      const video = await setupCamera();
+      video.play();
+
+      const canvas = document.getElementById("canvas");
+
+      async function renderLoop() {
+        await detect(video, canvas);
+        requestAnimationFrame(renderLoop);
+      }
+
+      renderLoop();
+    }
+
+    main();
+  </script>
+</body>
+</html>
