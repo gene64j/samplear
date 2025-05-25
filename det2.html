@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>リアルタイム顔検出</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <style>
     body {
       margin: 0;
@@ -13,9 +13,12 @@
       position: absolute;
       top: 0;
       left: 0;
-      width: 100vw;
-      height: 100vh;
+      width: 100%;
+      height: 100%;
       object-fit: cover;
+    }
+    #canvas {
+      z-index: 10;
     }
   </style>
 </head>
@@ -28,13 +31,11 @@
     const threshold = 0.5;
     let model;
 
-    // モデル読み込み
     async function loadModel() {
       model = await tf.loadGraphModel("web_model/model.json");
       console.log("モデル読み込み完了");
     }
 
-    // カメラ起動
     async function setupCamera() {
       const video = document.getElementById("video");
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -43,49 +44,57 @@
       });
       video.srcObject = stream;
       return new Promise(resolve => {
-        video.onloadedmetadata = () => {
-          resolve(video);
-        };
+        video.onloadedmetadata = () => resolve(video);
       });
     }
 
     async function detect(video, canvas) {
-      const ctx = canvas.getContext("2d");
-
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
 
+      const ctx = canvas.getContext("2d");
+
       const inputTensor = tf.browser.fromPixels(video).expandDims(0).cast('int32');
       const dict = { 'input_tensor': inputTensor };
-      const results = await model.executeAsync(dict);
 
-      const boxes = results[1].arraySync()[0];
-      const scores = results[2].arraySync()[0];
+      const results = await model.executeAsync(dict);
+      const [classesTensor, boxesTensor, multiScoresTensor] = [
+        results[0],
+        results[1],
+        results[2]
+      ];
+
+      const boxes = boxesTensor.arraySync()[0];
+      const scoresRaw = multiScoresTensor.arraySync()[0];
+
+      const scores = [];
+      const classIndices = [];
+      for (let i = 0; i < scoresRaw.length; i++) {
+        const maxScore = Math.max(...scoresRaw[i]);
+        const classIdx = scoresRaw[i].indexOf(maxScore);
+        scores.push(maxScore);
+        classIndices.push(classIdx);
+      }
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
       for (let i = 0; i < boxes.length; i++) {
-        const scoreArray = scores[i];
-        const maxScore = Math.max(...scoreArray);
-        const classIndex = scoreArray.indexOf(maxScore);
-        const label = classNames[classIndex];
+        const classIdx = classIndices[i];
+        const label = classNames[classIdx];
+        if (label !== "face") continue;
 
-        if (maxScore > threshold && label === "face") {
-          const [ymin, xmin, ymax, xmax] = boxes[i];
-          const x = xmin * canvas.width;
-          const y = ymin * canvas.height;
-          const w = (xmax - xmin) * canvas.width;
-          const h = (ymax - ymin) * canvas.height;
-          console.log(`Detected: ${label} (${x}, ${y}, ${w}, ${h}) with score ${maxScore}`);
+        const [ymin, xmin, ymax, xmax] = boxes[i];
+        const x = xmin * canvas.width;
+        const y = ymin * canvas.height;
+        const w = (xmax - xmin) * canvas.width;
+        const h = (ymax - ymin) * canvas.height;
+        console.log(`Detected: ${label} at [${x}, ${y}, ${w}, ${h}] with score ${(scores[i] * 100).toFixed(1)}%`);
 
-          ctx.strokeStyle = "red";
-          ctx.lineWidth = 3;
-          ctx.strokeRect(x, y, w, h);
-
-          ctx.fillStyle = "red";
-          ctx.font = "18px sans-serif";
-          ctx.fillText(`${label} ${(maxScore * 100).toFixed(1)}%`, x + 4, y + 18);
-        }
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'red';
+        ctx.strokeRect(x, y, w, h);
+        ctx.fillStyle = "red";
+        ctx.font = "16px sans-serif";
+        ctx.fillText(`${label} ${(scores[i] * 100).toFixed(1)}%`, x + 4, y + 18);
       }
 
       tf.dispose([inputTensor, ...results]);
@@ -99,6 +108,7 @@
       const canvas = document.getElementById("canvas");
 
       async function renderLoop() {
+        const start = performance.now();
         await detect(video, canvas);
         requestAnimationFrame(renderLoop);
       }
