@@ -38,7 +38,7 @@
     async function setupCamera() {
       const video = document.getElementById("video");
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: { facingMode: "environment" },
         audio: false
       });
       video.srcObject = stream;
