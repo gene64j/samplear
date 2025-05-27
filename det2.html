@@ -56,7 +56,13 @@
       });
     }
 
-    async function detect(video, canvas, ctx) {
+    async function detect() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1.0;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = "blue";
+      ctx.lineWidth = 5;
+      ctx.strokeRect(10, 10, canvas.width - 10, canvas.height - 10); // 画面中央付近に描画されるはず
 
       const inputTensor = tf.browser.fromPixels(video).expandDims(0).cast('int32');
       const dict = { 'input_tensor': inputTensor };
@@ -75,13 +81,6 @@
         scores.push(maxScore);
         classIndices.push(classIdx);
       }
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.globalAlpha = 1.0;
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = "blue";
-      ctx.lineWidth = 5;
-      ctx.strokeRect(10, 10, canvas.width - 10, canvas.height - 10); // 画面中央付近に描画されるはず
 
       for (let i = 0; i < boxes.length; i++) {
         const score = scores[i];
@@ -106,19 +105,19 @@
       }
 
       tf.dispose([inputTensor, ...results]);
+      requestAnimationFrame(() => detect(video, canvas, ctx));
     }
 
     async function main() {
-      await loadModel();
-      const video = await setupCamera();
-      video.play();
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-
-      async function renderLoop() {
-        await detect(video, canvas, ctx);
-        requestAnimationFrame(renderLoop);
+      try {
+        await setupCamera();
+        await loadModel();
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        await detect();
+      }
+      catch (error) {
+        console.error("Error: ", error);
       }
 
       renderLoop();
