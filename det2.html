@@ -9,26 +9,28 @@
       margin: 0;
       overflow: hidden;
     }
-    #video, #canvas {
+    video {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
+      z-index: 1;
     }
-    #video {
-      z-index: 0;
-    }
-    #canvas {
-      z-index: 10;
-      pointer-events: none;
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
     }
   </style>
 </head>
 <body>
   <video id="video" autoplay playsinline muted></video>
-  <canvas id="canvas"></canvas>
+  <canvas id="output_canvas"></canvas>
 
   <script>
     const classNames = ["face", "horn", "left_eye", "nose", "right_eye"];
@@ -111,7 +113,7 @@
       const video = await setupCamera();
       video.play();
 
-      const canvas = document.getElementById("canvas");
+      const canvas = document.getElementById("output_canvas");
       const ctx = canvas.getContext("2d");
 
       async function renderLoop() {
