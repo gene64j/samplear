@@ -33,6 +33,8 @@
   <canvas id="output_canvas"></canvas>
 
   <script>
+    const canvas = document.getElementById("output_canvas");
+    const ctx = canvas.getContext("2d");
     const classNames = ["face", "horn", "left_eye", "nose", "right_eye"];
     const threshold = 0.5;
     let model;
@@ -112,9 +114,6 @@
       await loadModel();
       const video = await setupCamera();
       video.play();
-
-      const canvas = document.getElementById("output_canvas");
-      const ctx = canvas.getContext("2d");
 
       async function renderLoop() {
         await detect(video, canvas, ctx);
