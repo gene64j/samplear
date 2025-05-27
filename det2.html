@@ -56,47 +56,58 @@
     }
 
     async function detect() {
-      if (!model || video.readyState < 2) {
-        requestAnimationFrame(detect);
-        return;
-      }
+      if (model && video.readyState === video.HAVE_ENOUGH_DATA) {
 
-      const inputTensor = tf.browser.fromPixels(video).expandDims(0).cast("int32");
-      const dict = { input_tensor: inputTensor };
-      const results = await model.executeAsync(dict);
-      const [classesTensor, boxesTensor, scoresTensor] = results;
+        const inputTensor = tf.browser.fromPixels(video).expandDims(0).cast("int32");
+        const dict = { input_tensor: inputTensor };
+        const results = await model.executeAsync(dict);
+        const [classesTensor, boxesTensor, multiScoresTensor] = results;
 
-      const boxes = boxesTensor.arraySync()[0];
-      const scores = scoresTensor.arraySync()[0];
+        const boxes = boxesTensor.arraySync()[0];
+        const scoresRaw = multiScoresTensor.arraySync()[0];
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const scores = [];
+        const classIndices = [];
+        for (let i = 0; i < scoresRaw.length; i++) {
+          const maxScore = Math.max(...scoresRaw[i]);
+          const classIdx = scoresRaw[i].indexOf(maxScore);
+          scores.push(maxScore);
+          classIndices.push(classIdx);
+        }
 
-      for (let i = 0; i < boxes.length; i++) {
-        const scoreArray = scores[i];
-        const maxScore = Math.max(...scoreArray);
-        const classIndex = scoreArray.indexOf(maxScore);
-        const label = classNames[classIndex];
+        // NMS適用
+        const nmsIndices = await tf.image.nonMaxSuppressionAsync(
+          tf.tensor2d(boxes),
+          tf.tensor1d(scores),
+          20,        // 最大出力数
+          0.5,       // IoU閾値
+          threshold  // スコア閾値
+        );
+        const selectedIndices = await nmsIndices.array();
 
-        if (maxScore > threshold && label === "face") {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        for (const i of selectedIndices) {
+          const classIndex = classIndices[i];
+          const label = classNames[classIndex];
+          if (label !== "face") continue;
+
           const [ymin, xmin, ymax, xmax] = boxes[i];
           const x = xmin * canvas.width;
           const y = ymin * canvas.height;
           const w = (xmax - xmin) * canvas.width;
           const h = (ymax - ymin) * canvas.height;
 
-          console.log(`🟥 ${label}: [${x.toFixed(1)}, ${y.toFixed(1)}, ${w.toFixed(1)}, ${h.toFixed(1)}]`);
-
           ctx.lineWidth = 3;
           ctx.strokeStyle = "red";
           ctx.strokeRect(x, y, w, h);
           ctx.fillStyle = "red";
           ctx.font = "16px sans-serif";
-          ctx.fillText(`${label} ${(maxScore * 100).toFixed(1)}%`, x + 4, y + 18);
+          ctx.fillText(`${label} ${(scores[i] * 100).toFixed(1)}%`, x + 4, y + 18);
         }
+
+        tf.dispose([inputTensor, ...results, nmsIndices]);
       }
-
-      tf.dispose([inputTensor, ...results]);
-
       requestAnimationFrame(detect);
     }
 
