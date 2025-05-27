@@ -9,118 +9,101 @@
       margin: 0;
       overflow: hidden;
     }
-    video {
+    video, canvas {
       position: absolute;
       top: 0;
       left: 0;
-      width: 100%;
-      height: 100%;
+      width: 100vw;
+      height: 100vh;
       object-fit: cover;
-      z-index: 1;
     }
     canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
       z-index: 2;
     }
   </style>
 </head>
 <body>
-  <video id="video" autoplay playsinline muted width="640" height="480"></video>
-  <canvas id="output_canvas" width="640" height="480"></canvas>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
 
   <script>
-    const canvas = document.getElementById("output_canvas");
-    const ctx = canvas.getContext("2d");
     const classNames = ["face", "horn", "left_eye", "nose", "right_eye"];
     const threshold = 0.5;
     let model;
 
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
     async function loadModel() {
       model = await tf.loadGraphModel("web_model/model.json");
-      console.log("モデル読み込み完了");
+      console.log("✅ モデル読み込み完了");
     }
 
     async function setupCamera() {
-      const video = document.getElementById("video");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
         audio: false
       });
       video.srcObject = stream;
       return new Promise(resolve => {
-        video.onloadedmetadata = () => resolve(video);
+        video.onloadedmetadata = () => {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          resolve();
+        };
       });
     }
 
     async function detect() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.globalAlpha = 1.0;
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = "blue";
-      ctx.lineWidth = 5;
-      ctx.strokeRect(10, 10, canvas.width - 10, canvas.height - 10); // 画面中央付近に描画されるはず
-
-      const inputTensor = tf.browser.fromPixels(video).expandDims(0).cast('int32');
-      const dict = { 'input_tensor': inputTensor };
-
-      const results = await model.executeAsync(dict);
-      const [classesTensor, boxesTensor, multiScoresTensor] = results;
-
-      const boxes = boxesTensor.arraySync()[0];
-      const scoresRaw = multiScoresTensor.arraySync()[0];
-
-      const scores = [];
-      const classIndices = [];
-      for (let i = 0; i < scoresRaw.length; i++) {
-        const maxScore = Math.max(...scoresRaw[i]);
-        const classIdx = scoresRaw[i].indexOf(maxScore);
-        scores.push(maxScore);
-        classIndices.push(classIdx);
+      if (!model || video.readyState < 2) {
+        requestAnimationFrame(detect);
+        return;
       }
 
+      const inputTensor = tf.browser.fromPixels(video).expandDims(0).cast("int32");
+      const dict = { input_tensor: inputTensor };
+      const results = await model.executeAsync(dict);
+      const [classesTensor, boxesTensor, scoresTensor] = results;
+
+      const boxes = boxesTensor.arraySync()[0];
+      const scores = scoresTensor.arraySync()[0];
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
       for (let i = 0; i < boxes.length; i++) {
-        const score = scores[i];
-        const labelIndex = classIndices[i];
-        const label = classNames[labelIndex];
-        if (score > threshold && label === "face") {
+        const scoreArray = scores[i];
+        const maxScore = Math.max(...scoreArray);
+        const classIndex = scoreArray.indexOf(maxScore);
+        const label = classNames[classIndex];
+
+        if (maxScore > threshold && label === "face") {
           const [ymin, xmin, ymax, xmax] = boxes[i];
           const x = xmin * canvas.width;
           const y = ymin * canvas.height;
           const w = (xmax - xmin) * canvas.width;
           const h = (ymax - ymin) * canvas.height;
 
-          console.log(`Detected: ${label} at [${x.toFixed(1)}, ${y.toFixed(1)}, ${w.toFixed(1)}, ${h.toFixed(1)}]`);
+          console.log(`🟥 ${label}: [${x.toFixed(1)}, ${y.toFixed(1)}, ${w.toFixed(1)}, ${h.toFixed(1)}]`);
 
           ctx.lineWidth = 3;
           ctx.strokeStyle = "red";
           ctx.strokeRect(x, y, w, h);
           ctx.fillStyle = "red";
           ctx.font = "16px sans-serif";
-          ctx.fillText(`${label} ${(score * 100).toFixed(1)}%`, x + 4, y + 18);
+          ctx.fillText(`${label} ${(maxScore * 100).toFixed(1)}%`, x + 4, y + 18);
         }
       }
 
       tf.dispose([inputTensor, ...results]);
-      requestAnimationFrame(() => detect(video, canvas, ctx));
+
+      requestAnimationFrame(detect);
     }
 
     async function main() {
-      try {
-        await setupCamera();
-        await loadModel();
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        await detect();
-      }
-      catch (error) {
-        console.error("Error: ", error);
-      }
-
-      renderLoop();
+      await setupCamera(); // カメラの準備を先に
+      await loadModel();   // モデルのロードを後に
+      detect();            // 推論開始
     }
 
     main();
