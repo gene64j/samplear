@@ -33,6 +33,7 @@
   <canvas id="output_canvas"></canvas>
 
   <script>
+    const video = document.getElementById("video");
     const canvas = document.getElementById("output_canvas");
     const ctx = canvas.getContext("2d");
     const classNames = ["face", "horn", "left_eye", "nose", "right_eye"];
@@ -45,7 +46,6 @@
     }
 
     async function setupCamera() {
-      const video = document.getElementById("video");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
         audio: false
@@ -57,8 +57,6 @@
     }
 
     async function detect(video, canvas, ctx) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
 
       const inputTensor = tf.browser.fromPixels(video).expandDims(0).cast('int32');
       const dict = { 'input_tensor': inputTensor };
@@ -114,6 +112,9 @@
       await loadModel();
       const video = await setupCamera();
       video.play();
+      
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
 
       async function renderLoop() {
         await detect(video, canvas, ctx);
