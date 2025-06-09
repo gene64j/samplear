@@ -61,7 +61,8 @@
         const inputTensor = tf.browser.fromPixels(video).expandDims(0).cast("int32");
         const dict = { input_tensor: inputTensor };
         const results = await model.executeAsync(dict);
-        const [classesTensor, boxesTensor, multiScoresTensor] = results;
+        const boxesTensor = results[1];
+        const multiScoresTensor = results[2];
 
         const boxes = boxesTensor.arraySync()[0];
         const scoresRaw = multiScoresTensor.arraySync()[0];

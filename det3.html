@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>物体検出（自動文字サイズ）</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0"></script>
+  <style>
+    body {
+      text-align: center;
+      font-family: sans-serif;
+    }
+    canvas {
+      border: 1px solid #ccc;
+      max-width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <h1>物体検出（文字サイズ調整あり）</h1>
+  <input type="file" id="imageUpload" accept="image/*" />
+  <br><br>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const classNames = ["face", "horn", "left_eye", "nose", "right_eye", "background"];
+    const threshold = 0.5;
+    let model;
+
+    async function loadModel() {
+      model = await tf.loadGraphModel('web_model/model.json');
+      console.log("✅ モデル読み込み完了");
+    }
+
+    async function runDetection(img) {
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+
+      const inputTensor = tf.browser.fromPixels(img).expandDims(0).cast('int32');
+      const results = await model.executeAsync({ 'input_tensor': inputTensor });
+
+      const boxesTensor = results[1];
+      const multiScoresTensor = results[2];
+
+      const boxes = boxesTensor.arraySync()[0];
+      const multiScores = multiScoresTensor.arraySync()[0];
+
+      const scores = [];
+      const classIndices = [];
+      for (let i = 0; i < multiScores.length; i++) {
+        const s = multiScores[i];
+        const maxScore = Math.max(...s);
+        const classIdx = s.indexOf(maxScore);
+        scores.push(maxScore);
+        classIndices.push(classIdx);
+      }
+
+      const nmsIndices = await tf.image.nonMaxSuppressionAsync(
+        tf.tensor2d(boxes),
+        tf.tensor1d(scores),
+        20,
+        0.5,
+        threshold
+      );
+
+      const selected = await nmsIndices.array();
+
+      // 自動スケーリング文字サイズ（画像高さの2%を目安に）
+      const fontSize = Math.max(12, Math.round(canvas.height * 0.02));
+      ctx.font = `${fontSize}px sans-serif`;
+
+      for (let i of selected) {
+        const [ymin, xmin, ymax, xmax] = boxes[i];
+        const x = xmin * img.width;
+        const y = ymin * img.height;
+        const w = (xmax - xmin) * img.width;
+        const h = (ymax - ymin) * img.height;
+
+        const label = classNames[classIndices[i]] || `class ${classIndices[i]}`;
+        const score = scores[i];
+
+        ctx.strokeStyle = "red";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+
+        ctx.fillStyle = "red";
+        ctx.fillText(`${label} (${(score * 100).toFixed(1)}%)`, x + 4, y + fontSize + 2);
+      }
+
+      tf.dispose([inputTensor, ...results, nmsIndices]);
+    }
+
+    document.getElementById("imageUpload").addEventListener("change", async (event) => {
+      const file = event.target.files[0];
+      const img = new Image();
+      img.onload = () => runDetection(img);
+      img.src = URL.createObjectURL(file);
+    });
+
+    loadModel();
+  </script>
+</body>
+</html>
