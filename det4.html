@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>リアルタイム顔検出と録画</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0"></script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+    #video, #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    #canvas {
+      z-index: 10;
+    }
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 20;
+      background: rgba(255,255,255,0.8);
+      padding: 10px;
+      border-radius: 6px;
+    }
+    button {
+      margin-right: 8px;
+    }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="controls">
+    <button id="start">録画開始</button>
+    <button id="stop">録画停止・保存</button>
+  </div>
+
+  <script>
+    const classNames = ["face", "horn", "left_eye", "nose", "right_eye"];
+    const threshold = 0.5;
+    let model;
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const video = document.getElementById("video");
+
+    let recorder;
+    let recordedChunks = [];
+
+    document.getElementById("start").addEventListener("click", () => {
+      const stream = canvas.captureStream(30);
+      recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+      recordedChunks = [];
+      recorder.ondataavailable = e => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunks, { type: "video/webm" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "recorded.webm";
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+      recorder.start();
+      console.log("🎥 録画開始");
+    });
+
+    document.getElementById("stop").addEventListener("click", () => {
+      if (recorder && recorder.state !== "inactive") {
+        recorder.stop();
+        console.log("🛑 録画停止");
+      }
+    });
+
+    async function loadModel() {
+      model = await tf.loadGraphModel("web_model/model.json");
+      console.log("モデル読み込み完了");
+    }
+
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false
+      });
+      video.srcObject = stream;
+      return new Promise(resolve => {
+        video.onloadedmetadata = () => resolve(video);
+      });
+    }
+
+    async function detect(video, canvas) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      const inputTensor = tf.browser.fromPixels(video).resizeBilinear([512, 512]).expandDims(0).toInt();
+      const dict = { 'input_tensor': inputTensor };
+
+      const results = await model.executeAsync(dict);
+      const boxes = results[1].arraySync()[0];
+      const scoresRaw = results[2].arraySync()[0];
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (let i = 0; i < boxes.length; i++) {
+        const scoreArr = scoresRaw[i];
+        const maxScore = Math.max(...scoreArr);
+        const classIdx = scoreArr.indexOf(maxScore);
+        const label = classNames[classIdx];
+
+        if (maxScore > threshold && label === "face") {
+          const [ymin, xmin, ymax, xmax] = boxes[i];
+          const x = xmin * canvas.width;
+          const y = ymin * canvas.height;
+          const w = (xmax - xmin) * canvas.width;
+          const h = (ymax - ymin) * canvas.height;
+
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = 'red';
+          ctx.strokeRect(x, y, w, h);
+          ctx.fillStyle = "red";
+          ctx.font = `${Math.max(16, Math.round(canvas.height * 0.02))}px sans-serif`;
+          ctx.fillText(`${label} ${(maxScore * 100).toFixed(1)}%`, x + 4, y + 18);
+        }
+      }
+
+      tf.dispose([inputTensor, ...results]);
+    }
+
+    async function main() {
+      await loadModel();
+      const video = await setupCamera();
+      video.play();
+
+      async function renderLoop() {
+        await detect(video, canvas);
+        requestAnimationFrame(renderLoop);
+      }
+      renderLoop();
+    }
+
+    main();
+  </script>
+</body>
+</html>
