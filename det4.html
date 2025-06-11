@@ -1,84 +1,45 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>リアルタイム顔検出と録画</title>
+  <meta charset="UTF-8" />
+  <title>リアルタイム顔検出 + 録画</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0"></script>
   <style>
     body {
       margin: 0;
       overflow: hidden;
     }
-    #video, #canvas {
+    #canvas {
       position: absolute;
       top: 0;
       left: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-    #canvas {
-      z-index: 10;
+      z-index: 1;
     }
     #controls {
       position: absolute;
       top: 10px;
       left: 10px;
-      z-index: 20;
-      background: rgba(255,255,255,0.8);
-      padding: 10px;
-      border-radius: 6px;
-    }
-    button {
-      margin-right: 8px;
+      z-index: 10;
+      background: rgba(255, 255, 255, 0.7);
+      padding: 8px;
+      border-radius: 8px;
     }
   </style>
 </head>
 <body>
-  <video id="video" autoplay playsinline muted></video>
-  <canvas id="canvas"></canvas>
   <div id="controls">
-    <button id="start">録画開始</button>
-    <button id="stop">録画停止・保存</button>
+    <button id="startRec">録画開始</button>
+    <button id="stopRec" disabled>録画停止</button>
   </div>
+  <video id="video" autoplay playsinline muted style="display: none;"></video>
+  <canvas id="canvas"></canvas>
 
   <script>
     const classNames = ["face", "horn", "left_eye", "nose", "right_eye"];
     const threshold = 0.5;
     let model;
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
-    const video = document.getElementById("video");
-
-    let recorder;
+    let mediaRecorder;
     let recordedChunks = [];
-
-    document.getElementById("start").addEventListener("click", () => {
-      const stream = canvas.captureStream(30);
-      recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-      recordedChunks = [];
-      recorder.ondataavailable = e => {
-        if (e.data.size > 0) recordedChunks.push(e.data);
-      };
-      recorder.onstop = () => {
-        const blob = new Blob(recordedChunks, { type: "video/webm" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "recorded.webm";
-        a.click();
-        URL.revokeObjectURL(url);
-      };
-      recorder.start();
-      console.log("🎥 録画開始");
-    });
-
-    document.getElementById("stop").addEventListener("click", () => {
-      if (recorder && recorder.state !== "inactive") {
-        recorder.stop();
-        console.log("🛑 録画停止");
-      }
-    });
 
     async function loadModel() {
       model = await tf.loadGraphModel("web_model/model.json");
@@ -86,8 +47,9 @@
     }
 
     async function setupCamera() {
+      const video = document.getElementById("video");
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: { facingMode: "environment" },
         audio: false
       });
       video.srcObject = stream;
@@ -96,38 +58,51 @@
       });
     }
 
-    async function detect(video, canvas) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+    async function detect(video, canvas, ctx) {
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      canvas.width = w;
+      canvas.height = h;
 
-      const inputTensor = tf.browser.fromPixels(video).resizeBilinear([512, 512]).expandDims(0).toInt();
-      const dict = { 'input_tensor': inputTensor };
+      // 背景として映像を描画
+      ctx.drawImage(video, 0, 0, w, h);
 
-      const results = await model.executeAsync(dict);
-      const boxes = results[1].arraySync()[0];
-      const scoresRaw = results[2].arraySync()[0];
+      const inputTensor = tf.browser.fromPixels(video).expandDims(0).cast('int32');
+      const results = await model.executeAsync({ 'input_tensor': inputTensor });
+      const [classesTensor, boxesTensor, multiScoresTensor] = results;
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const boxes = boxesTensor.arraySync()[0];
+      const scoresRaw = multiScoresTensor.arraySync()[0];
+
+      // 最大スコアとクラス取得
+      const scores = [];
+      const classIndices = [];
+      for (let i = 0; i < scoresRaw.length; i++) {
+        const maxScore = Math.max(...scoresRaw[i]);
+        const classIdx = scoresRaw[i].indexOf(maxScore);
+        scores.push(maxScore);
+        classIndices.push(classIdx);
+      }
 
       for (let i = 0; i < boxes.length; i++) {
-        const scoreArr = scoresRaw[i];
-        const maxScore = Math.max(...scoreArr);
-        const classIdx = scoreArr.indexOf(maxScore);
+        const score = scores[i];
+        const classIdx = classIndices[i];
         const label = classNames[classIdx];
-
-        if (maxScore > threshold && label === "face") {
+        if (score > threshold && label === "face") {
           const [ymin, xmin, ymax, xmax] = boxes[i];
-          const x = xmin * canvas.width;
-          const y = ymin * canvas.height;
-          const w = (xmax - xmin) * canvas.width;
-          const h = (ymax - ymin) * canvas.height;
+          const x = xmin * w;
+          const y = ymin * h;
+          const boxWidth = (xmax - xmin) * w;
+          const boxHeight = (ymax - ymin) * h;
 
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = 'red';
-          ctx.strokeRect(x, y, w, h);
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "red";
+          ctx.strokeRect(x, y, boxWidth, boxHeight);
+
+          const fontSize = Math.max(16, Math.round(h / 40));
+          ctx.font = `${fontSize}px sans-serif`;
           ctx.fillStyle = "red";
-          ctx.font = `${Math.max(16, Math.round(canvas.height * 0.02))}px sans-serif`;
-          ctx.fillText(`${label} ${(maxScore * 100).toFixed(1)}%`, x + 4, y + 18);
+          ctx.fillText(`${label} ${(score * 100).toFixed(1)}%`, x + 4, y + fontSize);
         }
       }
 
@@ -139,12 +114,47 @@
       const video = await setupCamera();
       video.play();
 
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+
       async function renderLoop() {
-        await detect(video, canvas);
+        await detect(video, canvas, ctx);
         requestAnimationFrame(renderLoop);
       }
+
       renderLoop();
     }
+
+    document.getElementById("startRec").addEventListener("click", () => {
+      const canvas = document.getElementById("canvas");
+      const stream = canvas.captureStream(30); // 30 FPS
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+
+      mediaRecorder.ondataavailable = function(e) {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = function() {
+        const blob = new Blob(recordedChunks, { type: "video/webm" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "recorded.webm";
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      mediaRecorder.start();
+      document.getElementById("startRec").disabled = true;
+      document.getElementById("stopRec").disabled = false;
+    });
+
+    document.getElementById("stopRec").addEventListener("click", () => {
+      mediaRecorder.stop();
+      document.getElementById("startRec").disabled = false;
+      document.getElementById("stopRec").disabled = true;
+    });
 
     main();
   </script>
